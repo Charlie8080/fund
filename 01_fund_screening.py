@@ -25,6 +25,11 @@ from config import get_logger, with_retry, with_cache, save_result, print_banner
 
 logger = get_logger(__name__)
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 
 def load_local_module(filename: str):
     module_name = filename.replace(".py", "").replace("-", "_")
@@ -206,6 +211,25 @@ def get_recent_strength_reference(fund_code: str) -> dict:
     except Exception as e:
         logger.error(f"获取基金{fund_code}近期强势/回撤数据失败: {e}")
         return {"fund_code": fund_code, "error": str(e)}
+
+
+def get_risk_return_reference(fund_code: str) -> dict:
+    """近1/3/6月夏普比率与波动率横向对比，来自 18_risk_return_screener.py。"""
+    try:
+        rr_mod = load_local_module("18_risk_return_screener.py")
+        return rr_mod.build_risk_return_reference(fund_code, max_presort_count=120)
+    except Exception as e:
+        logger.error(f"获取基金{fund_code}夏普/波动率横向对比失败: {e}")
+        return {
+            "fund_code": fund_code,
+            "error": str(e),
+            "risk_return_guard": {
+                "passed": False,
+                "level": "unknown",
+                "message": "夏普/波动率横向对比数据缺失",
+                "risk_flags": [str(e)],
+            },
+        }
 
 
 def evaluate_selection_reference(fund_data: dict) -> dict:
@@ -472,6 +496,7 @@ def screen_fund(fund_code: str) -> dict:
         "performance": get_fund_performance_rank(fund_code),
         "risk_metrics": get_fund_risk_metrics(fund_code),
         "recent_strength_reference": get_recent_strength_reference(fund_code),
+        "risk_return_reference": get_risk_return_reference(fund_code),
     }
     result["screening"] = check_screening_thresholds(result)
     result["selection_reference"] = evaluate_selection_reference(result)
@@ -543,6 +568,31 @@ def screen_fund(fund_code: str) -> dict:
     for flag in drawdown_guard.get("support_flags", []):
         print(f"  + {flag}")
     for flag in drawdown_guard.get("risk_flags", []):
+        print(f"  · {flag}")
+
+    risk_return_reference = result.get("risk_return_reference", {})
+    rr_guard = risk_return_reference.get("risk_return_guard", {})
+    print(f"\n【夏普比率/波动率横向闸门】{rr_guard.get('level')}")
+    for item in risk_return_reference.get("risk_return_metrics", []):
+        if item.get("error"):
+            print(f"  [DATA] {item.get('period')}: {item.get('error')}")
+            continue
+        rank_text = (
+            f"{item.get('risk_return_rank')}/{item.get('computed_peer_count')}"
+            if item.get("risk_return_rank") is not None
+            else "排名缺失"
+        )
+        status = "[PASS]" if item.get("top5pct_pass") and item.get("sharpe_ge_min_pass") else "[FAIL]"
+        print(
+            f"  {status} {item.get('period_label')}: 夏普{item.get('sharpe_ratio')}，"
+            f"年化波动{item.get('annualized_volatility_pct')}%，"
+            f"阶段收益{item.get('period_return_pct')}%，"
+            f"样本排名{rank_text}，样本前{item.get('computed_rank_pct')}%"
+        )
+    print(f"  结论: {rr_guard.get('message')}")
+    for flag in rr_guard.get("support_flags", []):
+        print(f"  + {flag}")
+    for flag in rr_guard.get("risk_flags", []):
         print(f"  · {flag}")
 
     save_path = save_result(result, f"fund_screening_{fund_code}", subdir="01_screening")

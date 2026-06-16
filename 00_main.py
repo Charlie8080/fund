@@ -177,13 +177,13 @@ def build_market_switch(broad_market: dict, sector_data: dict, global_data: dict
 
 def run_full_analysis(fund_code: str) -> dict:
     """完整执行 Step 1-7 分析流程"""
-    print_banner(f"★ 基金智能筛选与行业轮动分析 v6.0 ★  目标：{fund_code}", char="═", width=70)
+    print_banner(f"★ 基金智能筛选与行业轮动分析 v6.19 ★  目标：{fund_code}", char="═", width=70)
     print(f"分析时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     final_report = {
         "fund_code": fund_code,
         "analysis_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "skill_version": "v6.0",
+        "skill_version": "v6.19",
     }
 
     # ===== Step 1.1 基金筛选 =====
@@ -191,9 +191,11 @@ def run_full_analysis(fund_code: str) -> dict:
     try:
         mod = load_module("01_fund_screening.py")
         final_report["step_1_1_screening"] = mod.screen_fund(fund_code)
+        final_report["step_1_1bis_risk_return"] = final_report["step_1_1_screening"].get("risk_return_reference", {})
     except Exception as e:
         logger.error(f"Step 1.1 失败: {e}")
         final_report["step_1_1_screening"] = {"error": str(e)}
+        final_report["step_1_1bis_risk_return"] = {"error": str(e)}
 
     # ===== Step 1.2 持仓数据 =====
     print_banner("Step 1.2 | 持仓数据", char="─")
@@ -428,6 +430,26 @@ def generate_summary(report: dict) -> dict:
         for flag in drawdown_guard.get("support_flags", [])[:2]:
             summary["key_findings"].append(f"持有支持证据：{flag}")
 
+    risk_return = report.get("step_1_1bis_risk_return") or report.get("step_1_1_screening", {}).get("risk_return_reference", {})
+    rr_guard = risk_return.get("risk_return_guard", {}) if isinstance(risk_return, dict) else {}
+    if rr_guard:
+        summary["key_findings"].append(
+            "夏普/波动率横向闸门："
+            f"{rr_guard.get('level')}；平均夏普{rr_guard.get('avg_sharpe')}，"
+            f"平均年化波动{rr_guard.get('avg_annualized_volatility_pct')}%，"
+            f"通过{rr_guard.get('passed_periods')}/{rr_guard.get('total_periods')}个窗口"
+        )
+        if rr_guard.get("level") in ["lagging", "unknown"]:
+            summary["risks"].append("⚠️ 夏普/波动率横向排名不足：不能支持强加仓，需与同类更强基金比较")
+        elif rr_guard.get("level") == "watch":
+            summary["risks"].append("夏普/波动率仅单窗口领先：只作为观察项，不支持追高重仓")
+        elif rr_guard.get("level") in ["risk_return_leader", "partial_leader"]:
+            summary["recommendations"].append(rr_guard.get("message", "风险收益横向表现较好，可作为继续持有参考"))
+        for flag in rr_guard.get("risk_flags", [])[:3]:
+            summary["risks"].append(f"风险收益风险：{flag}")
+        for flag in rr_guard.get("support_flags", [])[:2]:
+            summary["key_findings"].append(f"风险收益支持证据：{flag}")
+
     quarterly_drift = report.get("step_1_6bis_quarterly_drift", {})
     valuation_bias = quarterly_drift.get("valuation_bias", {}) if isinstance(quarterly_drift, dict) else {}
     if valuation_bias:
@@ -583,7 +605,7 @@ def run_tracking(
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("=" * 60)
-        print("基金智能筛选与行业轮动分析师 v6.0 - 统一入口")
+        print("基金智能筛选与行业轮动分析师 v6.19 - 统一入口")
         print("=" * 60)
         print("\n用法：")
         print("  python 00_main.py <基金代码>                # 完整分析")

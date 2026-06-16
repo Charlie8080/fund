@@ -541,6 +541,86 @@ def enrich_candidate_with_drawdown(candidate: dict) -> dict:
     }
 
 
+def attach_risk_return_to_candidates(candidates: list[dict], max_presort_count: int = 80) -> list[dict]:
+    """批量叠加夏普比率/波动率横向对比，避免逐只基金重复扫描同类池。"""
+    if not candidates:
+        return []
+    try:
+        rr_mod = load_local_module("18_risk_return_screener.py")
+        codes = [item["fund_code"] for item in candidates if item.get("fund_code")]
+        comparison = rr_mod.compare_funds_risk_return(
+            codes,
+            min_sharpe=2.0,
+            max_presort_count=max_presort_count,
+            verbose=False,
+        )
+        references = comparison.get("references", {})
+    except Exception as exc:
+        logger.warning(f"热点候选夏普/波动率横向对比失败: {exc}")
+        return [
+            {
+                **item,
+                "risk_return_error": str(exc),
+                "risk_return_level": "unknown",
+                "risk_return_pass": False,
+                "final_score": round(clamp(item.get("final_score", item.get("base_score", 0)) - 6, 0, 160), 2),
+            }
+            for item in candidates
+        ]
+
+    enriched = []
+    for item in candidates:
+        ref = references.get(item.get("fund_code"), {})
+        guard = ref.get("risk_return_guard", {})
+        level = guard.get("level", "unknown")
+        score = item.get("final_score", item.get("base_score", 0))
+        if level == "risk_return_leader":
+            score += 16
+        elif level == "partial_leader":
+            score += 9
+        elif level == "watch":
+            score -= 2
+        elif level == "lagging":
+            score -= 10
+        else:
+            score -= 6
+        if guard.get("avg_sharpe") is not None and guard["avg_sharpe"] >= 2:
+            score += 5
+        if guard.get("avg_annualized_volatility_pct") is not None and guard["avg_annualized_volatility_pct"] >= 35:
+            score -= 5
+
+        recommendation_level = item.get("recommendation_level")
+        recommendation_action = item.get("recommendation_action", "")
+        if level in ["lagging", "unknown"]:
+            if recommendation_level == "strong_recommend":
+                recommendation_level = "watch_candidate"
+            elif recommendation_level == "watch_candidate":
+                recommendation_level = "only_watch"
+            recommendation_action += "；夏普/波动率横向排名不足，不能作为强买入，只能等待回撤和技术企稳"
+        elif level == "watch" and recommendation_level == "strong_recommend":
+            recommendation_level = "watch_candidate"
+            recommendation_action += "；风险收益仅单窗口领先，强推荐降级为观察候选"
+        elif level in ["risk_return_leader", "partial_leader"]:
+            recommendation_action += "；夏普/波动率横向对比提供正向支持"
+
+        enriched.append(
+            {
+                **item,
+                "risk_return_level": level,
+                "risk_return_pass": bool(guard.get("passed")),
+                "avg_sharpe": guard.get("avg_sharpe"),
+                "avg_annualized_volatility_pct": guard.get("avg_annualized_volatility_pct"),
+                "avg_risk_return_rank_pct": guard.get("avg_risk_return_rank_pct"),
+                "risk_return_guard": guard,
+                "risk_return_metrics": ref.get("risk_return_metrics", []),
+                "recommendation_level": recommendation_level,
+                "recommendation_action": recommendation_action,
+                "final_score": round(clamp(score, 0, 160), 2),
+            }
+        )
+    return enriched
+
+
 def evaluate_current_fund_alignment(fund_code: str, hot_sectors: list[dict]) -> dict:
     if not fund_code:
         return {}
@@ -629,6 +709,7 @@ def analyze_hot_sector_funds(
     enriched = []
     for candidate in raw_candidates[:enrich_limit]:
         enriched.append(enrich_candidate_with_drawdown(candidate))
+    enriched = attach_risk_return_to_candidates(enriched)
     enriched = sorted(enriched, key=lambda item: item.get("final_score", item.get("base_score", 0)), reverse=True)
     recommendations = enriched[:top_funds]
     alignment = evaluate_current_fund_alignment(fund_code, hot) if fund_code else {}
@@ -640,6 +721,7 @@ def analyze_hot_sector_funds(
         print(
             f"  {idx:2d}. {fund['fund_code']} {fund['fund_name']} | {fund['matched_sector']} "
             f"日{fund.get('daily_pct')}%  1月{fund.get('month1_pct')}%  3月{fund.get('month3_pct')}% "
+            f"夏普均值{fund.get('avg_sharpe')} 波动{fund.get('avg_annualized_volatility_pct')}% "
             f"得分{fund.get('final_score', fund.get('base_score'))}  {fund.get('recommendation_level')}"
         )
         print(f"      {fund.get('recommendation_action')}")

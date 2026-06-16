@@ -1,7 +1,7 @@
-# 基金智能筛选与行业轮动分析师 v6.18 - Python API 脚本集
+# 基金智能筛选与行业轮动分析师 v6.19 - Python API 脚本集
 
 > 配套 `SKILL.md` 的实战数据接口脚本集合
-> 覆盖实时数据、热点板块基金推荐、回撤/涨跌幅/同赛道平均/排名四维闸门、季报滞后估值偏差、重仓股趋势共振、大盘总开关、外围局势风险雷达、量化验证闸门和持仓控亏逻辑
+> 覆盖实时数据、热点板块基金推荐、夏普比率/波动率横向筛选、回撤/涨跌幅/同赛道平均/排名四维闸门、季报滞后估值偏差、重仓股趋势共振、大盘总开关、外围局势风险雷达、量化验证闸门和持仓控亏逻辑
 
 ---
 
@@ -31,6 +31,7 @@ fund_api_scripts/
 ├── 15_sector_rotation.py          # v6.4 行业/主题轮动软闸门
 ├── 16_quarterly_drift.py          # ★ v6.17 季报滞后与估值偏差识别
 ├── 17_hot_sector_fund_recommendation.py # ★ v6.18 热点板块基金推荐
+├── 18_risk_return_screener.py     # ★ v6.19 夏普比率/波动率横向筛选
 ├── fund_drawdown_report.py        # ★ v6.17 回撤画像 + 四维严格闸门
 │
 ├── cache/                         # 数据缓存（自动生成）
@@ -67,7 +68,7 @@ pip install -r requirements.txt
 ### 2. 一键完整分析（推荐）
 
 ```bash
-# 对某只基金执行完整 v6.18 分析
+# 对某只基金执行完整 v6.19 分析
 python 00_main.py 001938
 ```
 
@@ -113,6 +114,11 @@ python 16_quarterly_drift.py 001438
 python 17_hot_sector_fund_recommendation.py 001438
 python 17_hot_sector_fund_recommendation.py
 
+# v6.19 夏普比率/波动率横向筛选
+python 18_risk_return_screener.py --fund-code 001438
+python 18_risk_return_screener.py --compare 001438 519771 012920
+python 18_risk_return_screener.py 混合型 all 2.0
+
 # 基金走势 + 买卖决策
 python 07_fund_trend.py 001938
 
@@ -149,6 +155,7 @@ python 00_main.py --track <代码> <买入价> <买入日期> [金额]  # 持仓
 - 近1/3/6月同赛道强势参考：排名前5%-10%、涨跌幅为正、且涨幅高于基准赛道
 - 四维严格闸门：回撤、基金涨跌幅、同赛道平均涨跌幅、同赛道排名前5；未通过时不支持强买入/强加仓
 - 持有回撤与同赛道排名闸门：当前回撤、近1年/近3年/成立以来最大回撤、平均修复天数、同类排名和基金经理近期调仓有效性；历史回撤用于仓位上限，不机械触发卖出
+- 夏普比率/波动率横向闸门：近1/3/6月夏普、年化波动率、阶段收益、最大回撤和同类样本排名；夏普前5%且≥2作为优先候选证据
 - 6项量化门槛检验结果
 
 ### `fund_drawdown_report.py` - 回撤画像与同赛道排名风控
@@ -204,10 +211,26 @@ python 16_quarterly_drift.py 001438
 - 对候选基金叠加近1/3/6月涨跌幅、同赛道排名、四维严格闸门和回撤画像
 - 如传入当前持有基金代码，输出当前基金季报持仓与热点板块的贴合度
 - 推荐分层：`strong_recommend` / `watch_candidate` / `only_watch` / `data_weak`
+- v6.19 叠加候选基金近1/3/6月夏普比率和年化波动率横向对比，风险收益排名不足时自动降级
 
 ```bash
 python 17_hot_sector_fund_recommendation.py 001438
 python 17_hot_sector_fund_recommendation.py --top-sectors 5 --top-funds 5
+```
+
+### `18_risk_return_screener.py` - 夏普比率/波动率横向筛选（Step 4.3penta）
+
+吸收 `D:\.temp\fund_screener.py` 的有效部分：先按同类近1/3/6月收益预筛，再拉日净值计算夏普比率、年化波动率、年化收益和最大回撤。
+
+**输出**：
+- 同类样本夏普排名前5%的基金，默认要求夏普≥2
+- 单只基金近1/3/6月风险收益画像与横向排名
+- 多只持有基金的夏普/波动率横向对比，用于持有、减仓、换基判断
+
+```bash
+python 18_risk_return_screener.py --fund-code 001438
+python 18_risk_return_screener.py --compare 001438 519771 012920
+python 18_risk_return_screener.py 混合型 all 2.0
 ```
 
 ### `04_technical_analysis.py` - 量价技术分析（Step 1.4 + 3.2 + ★6.1第三步）
@@ -408,6 +431,7 @@ A：严格对应 skill 文件的 6.1 第三步。核心逻辑：
 | :--- | :--------- | :------- |
 | v1.0 | 2026-04-22 | 初版：配套 skill v4.0 全 9 脚本 + 统一入口 |
 | v6.18 | 2026-06-16 | 新增热点板块基金推荐：扫描行业/概念板块涨幅，匹配主题基金，并叠加回撤、同赛道排名和四维闸门过滤后输出候选基金 |
+| v6.19 | 2026-06-17 | 新增夏普比率/波动率横向筛选：近1/3/6月计算风险收益指标，优先筛选同类前5%且夏普≥2的基金，并接入持仓横向对比和热点候选排序 |
 
 ---
 
