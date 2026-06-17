@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import inspect
+import json
 import os
 import re
 import sys
@@ -107,6 +108,57 @@ def dataframe_records(df: pd.DataFrame, columns: list[str] | None = None) -> lis
 def fetch_board_spot(board_type: str) -> list[dict]:
     """Return JSON-safe board spot records for industry or concept boards."""
     try:
+        df = fetch_board_spot_direct(board_type)
+    except Exception as direct_exc:
+        logger.warning(f"东方财富webguest板块实时接口失败，尝试AkShare备用接口: {board_type} {direct_exc}")
+        try:
+            if board_type == "industry":
+                df = ak.stock_board_industry_name_em()
+            elif board_type == "concept":
+                df = ak.stock_board_concept_name_em()
+            else:
+                return []
+        except Exception as ak_exc:
+            raise RuntimeError(f"webguest与AkShare板块实时接口均失败: webguest={direct_exc}; akshare={ak_exc}") from ak_exc
+
+    if df.empty:
+        try:
+            logger.warning(f"东方财富webguest板块实时接口返回空表，尝试AkShare备用接口: {board_type}")
+            if board_type == "industry":
+                df = ak.stock_board_industry_name_em()
+            elif board_type == "concept":
+                df = ak.stock_board_concept_name_em()
+            else:
+                return []
+        except Exception as ak_exc:
+            raise RuntimeError(f"webguest返回空表且AkShare板块备用接口失败: {ak_exc}") from ak_exc
+
+    if df.empty:
+        return []
+
+    name_col = "板块名称" if "板块名称" in df.columns else "名称"
+    pct_col = "涨跌幅" if "涨跌幅" in df.columns else "涨幅"
+    records = []
+    for _, row in df.iterrows():
+        name = str(row.get(name_col, "")).strip()
+        change_pct = parse_float(row.get(pct_col))
+        if not name or change_pct is None:
+            continue
+        records.append(
+            {
+                "board_type": board_type,
+                "sector": name,
+                "change_pct": round(change_pct, 2),
+                "source": row.get("数据源")
+                or ("东方财富-行业板块" if board_type == "industry" else "东方财富-概念板块"),
+            }
+        )
+    return records
+
+
+def fetch_board_spot_akshare_first(board_type: str) -> list[dict]:
+    """Deprecated compatibility route: keep AkShare-first behavior for manual diagnosis."""
+    try:
         if board_type == "industry":
             df = ak.stock_board_industry_name_em()
         elif board_type == "concept":
@@ -114,7 +166,7 @@ def fetch_board_spot(board_type: str) -> list[dict]:
         else:
             return []
     except Exception as exc:
-        logger.warning(f"AkShare板块接口失败，尝试东方财富直连接口: {board_type} {exc}")
+        logger.warning(f"AkShare板块接口失败，尝试东方财富webguest实时接口: {board_type} {exc}")
         df = fetch_board_spot_direct(board_type)
 
     if df.empty:
@@ -133,47 +185,82 @@ def fetch_board_spot(board_type: str) -> list[dict]:
                 "board_type": board_type,
                 "sector": name,
                 "change_pct": round(change_pct, 2),
-                "source": "东方财富-行业板块" if board_type == "industry" else "东方财富-概念板块",
+                "source": row.get("数据源")
+                or ("东方财富-行业板块" if board_type == "industry" else "东方财富-概念板块"),
             }
         )
     return records
 
 
+def parse_eastmoney_json_or_jsonp(text: str) -> dict:
+    """Parse Eastmoney JSON/JSONP payload returned by clist endpoints."""
+    body = (text or "").strip()
+    match = re.match(r"^[\w$]+\((.*)\)\s*;?$", body, flags=re.S)
+    if match:
+        body = match.group(1)
+    return json.loads(body)
+
+
 def fetch_board_spot_direct(board_type: str) -> pd.DataFrame:
     if board_type == "industry":
-        url = "https://17.push2.eastmoney.com/api/qt/clist/get"
+        fs = "m:90 t:2 f:!50"
         params = {
             "pn": "1",
             "pz": "120",
             "po": "1",
             "np": "1",
-            "ut": "bd1d9ddb04089700cf9c27f6f7426281",
+            "ut": "fa5fd1943c7b386f172d6893dbfba10b",
             "fltt": "2",
             "invt": "2",
             "fid": "f3",
-            "fs": "m:90 t:2 f:!50",
+            "fs": fs,
             "fields": "f3,f12,f14",
+            "dect": "1",
+            "timil": "1",
+            "cb": "jQuery1123000000000000000_1",
         }
+        legacy_url = "https://17.push2.eastmoney.com/api/qt/clist/get"
     elif board_type == "concept":
-        url = "https://79.push2.eastmoney.com/api/qt/clist/get"
+        fs = "m:90 t:3 f:!50"
         params = {
             "pn": "1",
             "pz": "120",
             "po": "1",
             "np": "1",
-            "ut": "bd1d9ddb04089700cf9c27f6f7426281",
+            "ut": "fa5fd1943c7b386f172d6893dbfba10b",
             "fltt": "2",
             "invt": "2",
             "fid": "f3",
-            "fs": "m:90 t:3 f:!50",
+            "fs": fs,
             "fields": "f3,f12,f14",
+            "dect": "1",
+            "timil": "1",
+            "cb": "jQuery1123000000000000000_2",
         }
+        legacy_url = "https://79.push2.eastmoney.com/api/qt/clist/get"
     else:
         return pd.DataFrame()
 
-    response = requests.get(url, params=params, headers=HTTP_HEADERS, timeout=15)
-    response.raise_for_status()
-    data = response.json()
+    url = "https://push2.eastmoney.com/webguest/api/qt/clist/get"
+    try:
+        response = requests.get(url, params=params, headers=HTTP_HEADERS, timeout=15)
+        response.raise_for_status()
+        data = parse_eastmoney_json_or_jsonp(response.text)
+    except Exception as exc:
+        logger.warning(f"东方财富webguest实时接口失败，尝试旧版直连接口: {board_type} {exc}")
+        legacy_params = {
+            key: value
+            for key, value in params.items()
+            if key not in {"cb", "timil", "dect"}
+        }
+        legacy_params["ut"] = "bd1d9ddb04089700cf9c27f6f7426281"
+        response = requests.get(legacy_url, params=legacy_params, headers=HTTP_HEADERS, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+
+    if data.get("rc") not in (0, None):
+        raise RuntimeError(f"东方财富板块接口返回异常: rc={data.get('rc')} data={data.get('data')}")
+
     rows = data.get("data", {}).get("diff", []) or []
     records = []
     for idx, item in enumerate(rows, 1):
@@ -183,6 +270,7 @@ def fetch_board_spot_direct(board_type: str) -> pd.DataFrame:
                 "板块名称": item.get("f14"),
                 "板块代码": item.get("f12"),
                 "涨跌幅": item.get("f3"),
+                "数据源": "东方财富webguest实时接口",
             }
         )
     return pd.DataFrame(records)
