@@ -1,7 +1,7 @@
-# 基金智能筛选与行业轮动分析师 v6.19 - Python API 脚本集
+# 基金智能筛选与行业轮动分析师 v6.23 - Python API 脚本集
 
 > 配套 `SKILL.md` 的实战数据接口脚本集合
-> 覆盖实时数据、热点板块基金推荐、夏普比率/波动率横向筛选、回撤/涨跌幅/同赛道平均/排名四维闸门、季报滞后估值偏差、重仓股趋势共振、大盘总开关、外围局势风险雷达、量化验证闸门和持仓控亏逻辑
+> 覆盖实时数据、宏观熊市风险预警、热点板块基金推荐、夏普比率/波动率横向筛选、回撤/涨跌幅/同赛道平均/排名四维闸门、季报滞后估值偏差、重仓股趋势共振、大盘总开关、外围局势风险雷达、量化验证闸门和持仓控亏逻辑
 
 ---
 
@@ -32,6 +32,7 @@ fund_api_scripts/
 ├── 16_quarterly_drift.py          # ★ v6.17 季报滞后与估值偏差识别
 ├── 17_hot_sector_fund_recommendation.py # ★ v6.18 热点板块基金推荐
 ├── 18_risk_return_screener.py     # ★ v6.19 夏普比率/波动率横向筛选
+├── 19_macro_bear_signal.py        # ★ v6.23 宏观熊市风险预警
 ├── fund_drawdown_report.py        # ★ v6.17 回撤画像 + 四维严格闸门
 │
 ├── cache/                         # 数据缓存（自动生成）
@@ -51,6 +52,7 @@ fund_api_scripts/
 python 13_quant_validation.py 011892 normal
 python 07_fund_trend.py 011892
 python 14_macro_geopolitical_risk.py 011892
+python 19_macro_bear_signal.py
 ```
 
 ### 1. 安装依赖
@@ -68,7 +70,7 @@ pip install -r requirements.txt
 ### 2. 一键完整分析（推荐）
 
 ```bash
-# 对某只基金执行完整 v6.19 分析
+# 对某只基金执行完整 v6.23 分析
 python 00_main.py 001938
 ```
 
@@ -118,6 +120,10 @@ python 17_hot_sector_fund_recommendation.py
 python 18_risk_return_screener.py --fund-code 001438
 python 18_risk_return_screener.py --compare 001438 519771 012920
 python 18_risk_return_screener.py 混合型 all 2.0
+
+# v6.23 宏观熊市风险预警（PMI/社融/估值/ROE/数据新鲜度）
+python 19_macro_bear_signal.py
+python 19_macro_bear_signal.py --no-save
 
 # 基金走势 + 买卖决策
 python 07_fund_trend.py 001938
@@ -231,6 +237,21 @@ python 17_hot_sector_fund_recommendation.py --top-sectors 5 --top-funds 5
 python 18_risk_return_screener.py --fund-code 001438
 python 18_risk_return_screener.py --compare 001438 519771 012920
 python 18_risk_return_screener.py 混合型 all 2.0
+```
+
+### `19_macro_bear_signal.py` - 宏观熊市风险预警（Step 2.7）
+
+吸收 `D:\.temp\13_macro_bear_signal.py` 的有效部分，并修正 Windows 输出编码、数据新鲜度和估值口径。脚本优先使用中证指数沪深300真实 PE 分位；失败时才退回价格分位代理，并明确标记。
+
+**输出**：
+- PMI、社融/信贷脉冲代理、沪深300估值分位、ROE周期
+- 每个宏观因子的数据日期和新鲜度
+- 综合宏观风险得分、风险等级和权益仓位上限
+- 已降级单因子：国家队减仓、北向流出、ETF份额下降都不能单独当硬信号
+
+```bash
+python 19_macro_bear_signal.py
+python 19_macro_bear_signal.py --no-save
 ```
 
 ### `04_technical_analysis.py` - 量价技术分析（Step 1.4 + 3.2 + ★6.1第三步）
@@ -432,6 +453,7 @@ A：严格对应 skill 文件的 6.1 第三步。核心逻辑：
 | v1.0 | 2026-04-22 | 初版：配套 skill v4.0 全 9 脚本 + 统一入口 |
 | v6.18 | 2026-06-16 | 新增热点板块基金推荐：扫描行业/概念板块涨幅，匹配主题基金，并叠加回撤、同赛道排名和四维闸门过滤后输出候选基金 |
 | v6.19 | 2026-06-17 | 新增夏普比率/波动率横向筛选：近1/3/6月计算风险收益指标，优先筛选同类前5%且夏普≥2的基金，并接入持仓横向对比和热点候选排序 |
+| v6.23 | 2026-06-17 | 新增宏观熊市风险预警：PMI、社融/信贷脉冲代理、沪深300PE分位、ROE周期和数据新鲜度共同决定权益仓位上限；国家队减仓、北向流出、ETF份额下降均降级为辅助因子 |
 
 ---
 
