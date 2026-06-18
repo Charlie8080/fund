@@ -33,6 +33,7 @@ fund_api_scripts/
 ├── 17_hot_sector_fund_recommendation.py # ★ v6.18 热点板块基金推荐
 ├── 18_risk_return_screener.py     # ★ v6.19 夏普比率/波动率横向筛选
 ├── 19_macro_bear_signal.py        # ★ v6.23 宏观熊市风险预警
+├── 20_strong_fund_screener.py     # ★ v6.24 强势基金趋势跟随筛选
 ├── fund_drawdown_report.py        # ★ v6.17 回撤画像 + 四维严格闸门
 │
 ├── cache/                         # 数据缓存（自动生成）
@@ -124,6 +125,10 @@ python 18_risk_return_screener.py 混合型 all 2.0
 # v6.23 宏观熊市风险预警（PMI/社融/估值/ROE/数据新鲜度）
 python 19_macro_bear_signal.py
 python 19_macro_bear_signal.py --no-save
+
+# v6.24 强势基金趋势跟随筛选（用英文CLI参数，避免Windows中文编码问题）
+python 20_strong_fund_screener.py --types mixed stock --top 10 --macro-state closed
+python 20_strong_fund_screener.py --types mixed stock --top 10 --format json
 
 # 基金走势 + 买卖决策
 python 07_fund_trend.py 001938
@@ -252,6 +257,22 @@ python 18_risk_return_screener.py 混合型 all 2.0
 ```bash
 python 19_macro_bear_signal.py
 python 19_macro_bear_signal.py --no-save
+```
+
+### `20_strong_fund_screener.py` - 强势基金趋势跟随筛选（Step 6.1ter）
+
+对应 v6.24，解决“强势基金不一定给 10%-15% 深回撤，可能小回调后继续走高”的筛选与执行问题。脚本命令行使用英文参数，脚本内部使用 UTF-8 中文列名，避免 Windows PowerShell 管道把中文参数转为 `???`。
+
+**输出**：
+- A股主动混合/股票基金中，近1/3/6月收益均为正的强势候选
+- 同类排名百分位、近1/3/6月最大回撤、夏普、年化波动率
+- MA10/MA20/MA60 趋势状态、申购状态、日累计限额
+- v6.24 三类买点：强势不回调观察仓、3%-6%小回调确认仓、8%-12%健康回撤主仓
+
+```bash
+python 20_strong_fund_screener.py --types mixed stock --top 10 --macro-state closed
+python 20_strong_fund_screener.py --types mixed stock --top 10 --format json
+python 20_strong_fund_screener.py --types mixed stock --top 20 --max-candidates 60 --macro-state open
 ```
 
 ### `04_technical_analysis.py` - 量价技术分析（Step 1.4 + 3.2 + ★6.1第三步）
